@@ -36,8 +36,8 @@ import (
 	"sort"
 	"strings"
 
-	"xnatrest/internal/dcm/dcmerr"
-	"xnatrest/internal/dcm/vr"
+	"github.com/JamesDarcy616/dicom/dcmerr"
+	"github.com/JamesDarcy616/dicom/vr"
 )
 
 type Dataset struct {

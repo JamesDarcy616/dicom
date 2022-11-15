@@ -35,7 +35,7 @@ import (
 	"fmt"
 	"strings"
 
-	"xnatrest/internal/dcm/tag"
+	"github.com/JamesDarcy616/dicom/tag"
 )
 
 type Element struct {

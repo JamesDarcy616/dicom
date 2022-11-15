@@ -37,9 +37,9 @@ import (
 	"os"
 	"sync"
 
-	"github.com/suyashkumar/dicom/pkg/uid"
-	"xnatrest/internal/dcm/dcmerr"
-	"xnatrest/internal/dcm/tag"
+	"github.com/JamesDarcy616/dicom/dcmerr"
+	"github.com/JamesDarcy616/dicom/tag"
+	"github.com/JamesDarcy616/dicom/uid"
 )
 
 const magic = "DICM"

@@ -35,7 +35,7 @@ import (
 	"fmt"
 	"strings"
 
-	"xnatrest/internal/dcm/dcmerr"
+	"github.com/JamesDarcy616/dicom/dcmerr"
 )
 
 type Value interface {

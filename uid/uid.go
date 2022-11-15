@@ -32,7 +32,7 @@ POSSIBILITY OF SUCH DAMAGE.
 package uid
 
 import (
-	"xnatrest/internal/dcm/dcmerr"
+	"github.com/JamesDarcy616/dicom/dcmerr"
 )
 
 var uidMap = make(map[string]*UIDInfo)

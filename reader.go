@@ -36,7 +36,7 @@ import (
 	"encoding/binary"
 	"io"
 
-	"xnatrest/internal/dcm/dcmerr"
+	"github.com/JamesDarcy616/dicom/dcmerr"
 )
 
 type Reader interface {
