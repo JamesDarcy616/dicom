@@ -33,6 +33,7 @@ package dicom
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"io"
 
@@ -175,6 +176,7 @@ func (r *reader) ReadString(len uint32) (string, error) {
 		return "", dcmerr.Errorf(dcmerr.ErrIO,
 			"error near byte %v (%08x) - %v", r.nRead, r.nRead, err.Error())
 	}
+	b = bytes.Trim(b, "\x00")
 	return string(b), nil
 }
 
