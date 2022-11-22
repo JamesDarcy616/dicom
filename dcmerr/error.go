@@ -106,6 +106,15 @@ func IsErrEOF(err error) bool {
 	}
 }
 
+func IsErrBadMagic(err error) bool {
+	switch err := err.(type) {
+	case DicomError:
+		return err.Code() == ErrBadMagic
+	default:
+		return false
+	}
+}
+
 func IsErrIterInvalid(err error) bool {
 	switch err := err.(type) {
 	case DicomError:

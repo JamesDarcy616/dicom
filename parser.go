@@ -169,18 +169,91 @@ func (p *Parser) checkHeader(r Reader) error {
 	return nil
 }
 
-func (p *Parser) checkSQMarker(tag uint32) (*Element, error) {
-	value, err := NewValue(nil)
-	if err != nil {
-		return nil, err
-	}
+func (p *Parser) checkSQMarker(tag uint32, r Reader) (*Element, error) {
 	switch tag {
 	case SQItem:
-		return NewElement(tag, "", UndefinedLength, value), nil
+		// SQItem can have a length or UndefinedLength
+		vl, err := r.ReadUint32LE()
+		if err != nil {
+			return nil, err
+		}
+		// Nil value can't create errors
+		value, _ := NewValue(nil)
+		return NewElement(tag, "", vl, value), nil
 	case SQItemDelim:
-		return NewElement(tag, "", UndefinedLength, value), nil
+		// SQItemDelim has a length of 0 always, skip the bytes of value length
+		err := r.Skip(4)
+		if err != nil {
+			return nil, err
+		}
+		// Nil value can't create errors
+		value, _ := NewValue(nil)
+		return NewElement(tag, "", 0, value), nil
 	case SQDelim:
-		return NewElement(tag, "", UndefinedLength, value), nil
+		// SQDelim has a length of 0 always, skip the bytes of value length
+		err := r.Skip(4)
+		if err != nil {
+			return nil, err
+		}
+		// Nil Value can't create errors
+		value, _ := NewValue(nil)
+		return NewElement(tag, "", 0, value), nil
+	}
+	return nil, nil
+}
+
+func (p *Parser) checkSQMarkerPeek(tag uint32, r Reader) (*Element, error) {
+	switch tag {
+	case SQItem:
+		// Skip the 4 bytes of the tag, reader was peeked
+		err := r.Skip(4)
+		if err != nil {
+			return nil, err
+		}
+		// SQItem can have a length or UndefinedLength
+		vl, err := r.ReadUint32LE()
+		if err != nil {
+			return nil, err
+		}
+		// Nil value can't create errors
+		value, _ := NewValue(nil)
+		return NewElement(tag, "", vl, value), nil
+	case SQItemDelim:
+		// SQItemDelim has a length of 0 always, skip the bytes of tag and length as reader was peeked
+		err := r.Skip(8)
+		if err != nil {
+			return nil, err
+		}
+		// Nil value can't create errors
+		value, _ := NewValue(nil)
+		return NewElement(tag, "", 0, value), nil
+	case SQDelim:
+		// SQDelim has a length of 0 always, skip the bytes of tag and length as reader was peeked
+		err := r.Skip(8)
+		if err != nil {
+			return nil, err
+		}
+		// Nil Value can't create errors
+		value, _ := NewValue(nil)
+		return NewElement(tag, "", 0, value), nil
+	}
+	return nil, nil
+}
+
+func (p *Parser) checkSQMarkerVL(tag, vl uint32) (*Element, error) {
+	switch tag {
+	case SQItem:
+		// Nil value can't create errors
+		value, _ := NewValue(nil)
+		return NewElement(tag, "", vl, value), nil
+	case SQItemDelim:
+		// Nil value can't create errors
+		value, _ := NewValue(nil)
+		return NewElement(tag, "", 0, value), nil
+	case SQDelim:
+		// Nil Value can't create errors
+		value, _ := NewValue(nil)
+		return NewElement(tag, "", 0, value), nil
 	}
 	return nil, nil
 }
@@ -208,6 +281,23 @@ func (p *Parser) parseAll(ds *Dataset, r Reader) error {
 		// Detect end of dataset when inside an SQ
 		if elem.Tag == SQItemDelim {
 			return nil
+		}
+		ds.Put(elem)
+	}
+}
+
+func (p *Parser) parseDatasetWithin(ds *Dataset, r Reader, length uint32) error {
+	limit := r.BytesRead() + uint64(length)
+	for {
+		if r.BytesRead() >= limit {
+			return nil
+		}
+		elem, err := p.readElement(r)
+		if err != nil {
+			if dcmerr.IsErrEOF(err) {
+				return nil
+			}
+			return err
 		}
 		ds.Put(elem)
 	}
@@ -262,25 +352,21 @@ func (p *Parser) readBytesValue(r Reader, vl uint32) (Value, error) {
 }
 
 func (p *Parser) readElement(r Reader) (*Element, error) {
-	tag, err := p.readLETag(r)
+	tag32, err := p.readLETag(r)
 	if err != nil {
 		return nil, err
 	}
-	// Short circuit on SQ markers
-	sqMarker, err := p.checkSQMarker(tag)
+	// Short circuit on SQ markers - read VL internally
+	sqMarker, err := p.checkSQMarker(tag32, r)
 	if err != nil {
 		return nil, dcmerr.Errorf(dcmerr.ErrIO,
 			"error near byte %v (%08x) - %v", r.BytesRead(), r.BytesRead(), err.Error())
 	}
 	if sqMarker != nil {
-		// Consume the remaining bytes of the SQ demarcation element
-		if err := r.Skip(4); err != nil {
-			return nil, err
-		}
 		return sqMarker, err
 	}
 
-	vr, err := p.readVR(r, tag)
+	vr, err := p.readVR(r, tag32)
 	if err != nil {
 		return nil, err
 	}
@@ -295,7 +381,7 @@ func (p *Parser) readElement(r Reader) (*Element, error) {
 			"error near byte %v (%08x) - %v", r.BytesRead(), r.BytesRead(), err.Error())
 	}
 
-	return NewElement(tag, vr, vl, value), nil
+	return NewElement(tag32, vr, vl, value), nil
 }
 
 func (p *Parser) readElementPeek(r Reader, maxTag uint32) (*Element, error) {
@@ -307,24 +393,18 @@ func (p *Parser) readElementPeek(r Reader, maxTag uint32) (*Element, error) {
 		return nil, dcmerr.Errorf(dcmerr.ErrIO,
 			"error peeking at byte %v (%08x) - %v", r.BytesRead(), r.BytesRead(), err.Error())
 	}
-	tag := p.readLETagBytes(peek[0:4])
-	if tag > maxTag {
+	tag32 := p.readLETagBytes(peek[0:4])
+	if tag32 > maxTag {
 		// Send ErrEOF to simulate the end of the stream
 		return nil, dcmerr.NewErrEOF()
 	}
 	// Short circuit on SQ markers
-	sqMarker, err := p.checkSQMarker(tag)
+	sqMarker, err := p.checkSQMarkerPeek(tag32, r)
 	if err != nil {
 		return nil, dcmerr.Errorf(dcmerr.ErrIO,
 			"error near byte %v (%08x) - %v", r.BytesRead(), r.BytesRead(), err.Error())
 	}
 	if sqMarker != nil {
-		// Consume the 8 bytes of the SQ demarcation element
-		if err := r.Skip(8); err != nil {
-			return nil,
-				dcmerr.Errorf(dcmerr.ErrIO,
-					"error skipping ahead at byte %v (%08x) - %v", r.BytesRead(), r.BytesRead(), err.Error())
-		}
 		return sqMarker, err
 	}
 
@@ -335,7 +415,7 @@ func (p *Parser) readElementPeek(r Reader, maxTag uint32) (*Element, error) {
 				"error skipping ahead at byte %v (%08x) - %v", r.BytesRead(), r.BytesRead(), err.Error())
 	}
 
-	vr, err := p.readVR(r, tag)
+	vr, err := p.readVR(r, tag32)
 	if err != nil {
 		return nil, err
 	}
@@ -350,7 +430,7 @@ func (p *Parser) readElementPeek(r Reader, maxTag uint32) (*Element, error) {
 			"error near byte %v (%08x) - %v", r.BytesRead(), r.BytesRead(), err.Error())
 	}
 
-	return NewElement(tag, vr, vl, value), nil
+	return NewElement(tag32, vr, vl, value), nil
 }
 
 // Read an element in ImpLE format regardless of TransferSyntax e.g. SQ items
@@ -364,8 +444,8 @@ func (p *Parser) readImpLEElement(r Reader) (*Element, error) {
 		return nil, dcmerr.Errorf(dcmerr.ErrIO,
 			"error near byte %v (%08x) - %v", r.BytesRead(), r.BytesRead(), err.Error())
 	}
-	// Short circuit on SQ markers
-	sqMarker, err := p.checkSQMarker(tag32)
+	// Short circuit on SQ markers VL already read - no skip
+	sqMarker, err := p.checkSQMarkerVL(tag32, vl)
 	if err != nil {
 		return nil, dcmerr.Errorf(dcmerr.ErrIO,
 			"error near byte %v (%08x) - %v", r.BytesRead(), r.BytesRead(), err.Error())
@@ -471,10 +551,21 @@ func (p *Parser) readSequence(r Reader) (Value, error) {
 				"SQItem tag expected at %v (%08x), found %08x", pos, pos, elem.Tag)
 		}
 		ds := NewDataset()
-		if err := p.parseAll(ds, r); err != nil {
-			return nil, err
+		if elem.VL == UndefinedLength {
+			// Undefined length item will end with SQItemDelim
+			if err := p.parseAll(ds, r); err != nil {
+				return nil, err
+			}
+		} else {
+			// Defined length item, parse at most VL bytes
+			if err := p.parseDatasetWithin(ds, r, elem.VL); err != nil {
+				return nil, err
+			}
 		}
-		items = append(items, ds)
+		// Add the Dataset if it's not empty
+		if ds.Size() > 0 {
+			items = append(items, ds)
+		}
 	}
 	return NewValue(items)
 }
